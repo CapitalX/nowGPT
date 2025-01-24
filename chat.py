@@ -60,6 +60,7 @@ def initialize_qa_chain():
         1. Direct Answer: [Concise answer to the question]
         2. Additional Details: [Relevant supporting information]
         3. Related Topics: [Suggest 2-3 related topics the user might be interested in]
+        4. Code Snippet/Example/Use Case: [If applicable, provide a code snippet]
 
         Answer:"""
         
