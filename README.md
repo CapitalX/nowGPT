@@ -163,3 +163,103 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Configuration and Customization
+
+### Essential Configuration
+
+1. **Environment Variables** (.env file):
+   ```env
+   OPENAI_API_KEY=your_openai_api_key
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_SERVICE_KEY=your_supabase_service_key
+   ```
+
+2. **PDF Directory Path** (pdf_processor.py):
+   ```python
+   pdf_directory = "/Users/itscapitalx/Desktop/Xanadu PDFS"  # Change to your PDF directory
+   ```
+   Also update this path in chat.py's get_document_stats function.
+
+### AI Model Customization
+
+1. **Chunk Size** (pdf_processor.py):
+   ```python
+   text_splitter = RecursativeCharacterTextSplitter(
+       chunk_size=1000,  # Adjust for different document lengths
+       chunk_overlap=200,  # Adjust for context preservation
+   )
+   ```
+
+2. **LLM Parameters** (chat.py):
+   ```python
+   llm=ChatOpenAI(
+       temperature=0.7,  # Adjust for creativity vs accuracy (0.0-1.0)
+   )
+   ```
+
+3. **Context Window** (chat.py):
+   ```python
+   retriever=vector_store.as_retriever(
+       search_kwargs={"k": 4}  # Adjust number of chunks retrieved
+   )
+   ```
+
+### Prompt Engineering
+
+1. **Assistant Personality** (chat.py):
+   ```python
+   prompt_template = """You are a ServiceNow Xanadu expert assistant...
+   // Customize the prompt template for different use cases
+   """
+   ```
+
+2. **Response Format** (chat.py):
+   Modify the response structure in the prompt template:
+   ```python
+   Please provide your response in the following format:
+   1. Direct Answer: [Concise answer to the question]
+   2. Additional Details: [Relevant supporting information]
+   3. Related Topics: [Suggest 2-3 related topics]
+   ```
+
+### Performance Optimization
+
+1. **Batch Processing** (pdf_processor.py):
+   ```python
+   batch_size = 100  # Adjust based on available memory
+   ```
+
+2. **Vector Search** (supabase_setup.sql):
+   ```sql
+   create index on documents using ivfflat (embedding vector_cosine_ops)
+       with (lists = 100);  # Adjust for dataset size
+   ```
+
+### UI Customization
+
+1. **Console Styling** (chat.py):
+   ```python
+   # Modify Rich console styles
+   border_style="cyan"  # Change colors
+   style="dim"         # Adjust text styles
+   ```
+
+2. **Display Options** (chat.py):
+   - Modify table columns in display_document_stats
+   - Adjust preview lengths in display_sources
+   - Customize progress bar messages
+
+### Error Handling
+
+1. **Chunk Size Limits** (pdf_processor.py):
+   ```python
+   if file_size > 100:  # Adjust warning threshold for large files
+       print(f"Warning: {filename} is quite large...")
+   ```
+
+2. **Retry Logic** (chat.py):
+   - Add custom retry logic for API calls
+   - Modify error messages and recovery behavior
+
+Remember to test thoroughly after making any modifications, especially when adjusting chunk sizes or batch processing parameters, as these can impact both performance and memory usage.
