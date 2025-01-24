@@ -17,6 +17,10 @@ from rich import print as rprint
 import time
 import json
 import PyPDF2
+from langchain.agents import initialize_agent, Tool
+from langchain.agents import AgentType
+from langchain.tools import tool
+from typing import List, Dict
 
 # Initialize Rich console
 console = Console()
@@ -43,9 +47,65 @@ def initialize_qa_chain():
             query_name="match_documents"
         )
         progress.update(task2, advance=100)
-        
-        # Custom prompt template
-        prompt_template = """You are a ServiceNow Xanadu expert assistant. Use the following pieces of context to answer the question at the end.
+
+        # Define source selection tool
+        @tool
+        def select_relevant_sources(query: str) -> List[str]:
+            """
+            Analyzes the query to determine which documentation sources are most relevant.
+            Returns a list of relevant PDF filenames.
+            """
+            source_descriptions = {
+                "xanadu_platform_security.pdf": "Security, authentication, authorization, compliance",
+                "xanadu_general_release_notes.pdf": "Release updates, changes, features, bug fixes",
+                "xanadu_api_references.pdf": "API documentation, endpoints, methods, parameters",
+                "xanadu_application_development.pdf": "Development guides, scripting, customization",
+                "xanadu_it_service_management.pdf": "ITSM processes, incident management, service desk",
+                "xanadu_glossary.pdf": "Technical terms, definitions, concepts",
+                "xanadu_customer_service_management.pdf": "CSM features, case management, customer service"
+            }
+            
+            # Create an agent to select sources
+            source_selector = ChatOpenAI(temperature=0)
+            response = source_selector.predict(
+                f"""Given this query: '{query}'
+                Select the most relevant documentation sources from:
+                {json.dumps(source_descriptions, indent=2)}
+                
+                Return only the filenames in a comma-separated list.
+                Consider:
+                1. Query topic and intent
+                2. Technical vs business focus
+                3. Specific feature mentions
+                
+                Return format: filename1.pdf,filename2.pdf
+                """
+            )
+            
+            return response.strip().split(',')
+
+        # Enhance retriever with filtered search
+        def filtered_retriever(query: str):
+            relevant_sources = select_relevant_sources(query)
+            console.print(f"[dim]Searching in: {', '.join(relevant_sources)}[/dim]")
+            
+            # Create metadata filter
+            filter_dict = {
+                "source": {
+                    "$in": relevant_sources
+                }
+            }
+            
+            # Return filtered search results
+            return vector_store.similarity_search_with_score(
+                query,
+                k=4,
+                filter=filter_dict
+            )
+
+        # Custom prompt template with source context
+        prompt_template = """You are an expert assistant. The user's question appears to be related to documentation from: {sources}.
+        Use the following pieces of context to answer the question at the end.
         If you don't know the answer, just say that you don't know, don't try to make up an answer.
         
         Context:
@@ -59,20 +119,20 @@ def initialize_qa_chain():
         Please provide your response in the following format:
         1. Direct Answer: [Concise answer to the question]
         2. Additional Details: [Relevant supporting information]
-        3. Related Topics: [Suggest 2-3 related topics the user might be interested in]
-        4. Code Snippet/Example/Use Case: [If applicable, provide a code snippet]
+        3. Related Topics: [Suggest 2-3 related topics]
+        4. Source Context: [Brief explanation of why these sources were chosen]
 
         Answer:"""
         
         PROMPT = PromptTemplate(
             template=prompt_template, 
-            input_variables=["context", "chat_history", "question"]
+            input_variables=["context", "chat_history", "question", "sources"]
         )
         
         task3 = progress.add_task("[yellow]Creating QA Chain...", total=100)
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=ChatOpenAI(temperature=0.7),
-            retriever=vector_store.as_retriever(search_kwargs={"k": 4}),
+            retriever=filtered_retriever,
             return_source_documents=True,
             combine_docs_chain_kwargs={"prompt": PROMPT},
             memory=ConversationBufferMemory(
