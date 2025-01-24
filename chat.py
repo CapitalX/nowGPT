@@ -21,6 +21,9 @@ from langchain.agents import initialize_agent, Tool
 from langchain.agents import AgentType
 from langchain.tools import tool
 from typing import List, Dict
+from langchain.schema import BaseRetriever, Document
+from pydantic import Field, BaseModel
+from langchain.memory import ConversationBufferWindowMemory
 
 # Initialize Rich console
 console = Console()
@@ -37,7 +40,7 @@ def initialize_qa_chain():
     with Progress() as progress:
         task1 = progress.add_task("[cyan]Initializing OpenAI...", total=100)
         embeddings = OpenAIEmbeddings()
-        progress.update(task1, advance=30)
+        progress.update(task1, completed=100)
         
         task2 = progress.add_task("[green]Setting up Vector Store...", total=100)
         vector_store = SupabaseVectorStore(
@@ -46,31 +49,29 @@ def initialize_qa_chain():
             table_name="documents",
             query_name="match_documents"
         )
-        progress.update(task2, advance=100)
+        progress.update(task2, completed=100)
 
-        # Define source selection tool
         @tool
         def select_relevant_sources(query: str) -> List[str]:
             """
             Analyzes the query to determine which documentation sources are most relevant.
             Returns a list of relevant PDF filenames.
             """
-            source_descriptions = {
-                "xanadu_platform_security.pdf": "Security, authentication, authorization, compliance",
-                "xanadu_general_release_notes.pdf": "Release updates, changes, features, bug fixes",
-                "xanadu_api_references.pdf": "API documentation, endpoints, methods, parameters",
-                "xanadu_application_development.pdf": "Development guides, scripting, customization",
-                "xanadu_it_service_management.pdf": "ITSM processes, incident management, service desk",
-                "xanadu_glossary.pdf": "Technical terms, definitions, concepts",
-                "xanadu_customer_service_management.pdf": "CSM features, case management, customer service"
+            sources_descriptions = {
+                "xanadu_platform_security.pdf": "Security features, authentication methods, authorization controls, compliance standards, data protection",
+                "xanadu_general_release_notes.pdf": "Product updates, new feature releases, improvements, bug fixes, deprecation notices",
+                "xanadu_api_references.pdf": "Complete API documentation, endpoint specifications, request/response formats, authentication methods",
+                "xanadu_application_development.pdf": "Development guidelines, scripting tutorials, customization options, best practices",
+                "xanadu_it_service_management.pdf": "ITSM workflows, incident/problem management, service desk operations, SLA management",
+                "xanadu_glossary.pdf": "Comprehensive technical terms, industry definitions, platform-specific concepts",
+                "xanadu_customer_service_management.pdf": "Customer service features, case management workflows, SLA tracking, customer engagement tools"
             }
             
-            # Create an agent to select sources
             source_selector = ChatOpenAI(temperature=0)
-            response = source_selector.predict(
+            response = source_selector.invoke(
                 f"""Given this query: '{query}'
                 Select the most relevant documentation sources from:
-                {json.dumps(source_descriptions, indent=2)}
+                {json.dumps(sources_descriptions, indent=2)}
                 
                 Return only the filenames in a comma-separated list.
                 Consider:
@@ -82,30 +83,55 @@ def initialize_qa_chain():
                 """
             )
             
+            # Extract the content from the response
+            if hasattr(response, 'content'):
+                return response.content.strip().split(',')
             return response.strip().split(',')
 
-        # Enhance retriever with filtered search
-        def filtered_retriever(query: str):
-            relevant_sources = select_relevant_sources(query)
-            console.print(f"[dim]Searching in: {', '.join(relevant_sources)}[/dim]")
+        class SmartRetriever(BaseRetriever):
+            """Custom retriever that filters by source before searching."""
             
-            # Create metadata filter
-            filter_dict = {
-                "source": {
-                    "$in": relevant_sources
-                }
-            }
-            
-            # Return filtered search results
-            return vector_store.similarity_search_with_score(
-                query,
-                k=4,
-                filter=filter_dict
-            )
+            vectorstore: SupabaseVectorStore = Field(description="Vector store for document retrieval")
+            relevant_sources: List[str] = Field(default_factory=list, description="Currently selected source documents")
 
-        # Custom prompt template with source context
-        prompt_template = """You are an expert assistant. The user's question appears to be related to documentation from: {sources}.
-        Use the following pieces of context to answer the question at the end.
+            class Config:
+                arbitrary_types_allowed = True
+
+            def __init__(self, vectorstore: SupabaseVectorStore):
+                super().__init__(vectorstore=vectorstore)
+                self.vectorstore = vectorstore
+                self.relevant_sources = []
+
+            def _get_relevant_documents(self, query: str) -> List[Document]:
+                """Get documents relevant to a query."""
+                tool_response = select_relevant_sources.invoke(query)
+                self.relevant_sources = tool_response.strip().split(',') if isinstance(tool_response, str) else tool_response
+                console.print(f"[dim]Searching in: {', '.join(self.relevant_sources)}[/dim]")
+                
+                filter_dict = {
+                    "sources": {
+                        "$in": self.relevant_sources
+                    }
+                }
+                
+                docs = self.vectorstore.similarity_search(
+                    query,
+                    k=4,
+                    filter=filter_dict
+                )
+                
+                # Ensure each document has the required metadata
+                for doc in docs:
+                    if 'sources' not in doc.metadata:
+                        doc.metadata['sources'] = doc.metadata.get('source', 'Unknown')
+                
+                return docs
+                
+            async def _aget_relevant_documents(self, query: str) -> List[Document]:
+                """Async version of get_relevant_documents."""
+                return self._get_relevant_documents(query)
+
+        prompt_template = """You are an expert assistant in ServiceNow Xanadu Release Notes and Documentation. Use the following pieces of context to answer the question at the end.
         If you don't know the answer, just say that you don't know, don't try to make up an answer.
         
         Context:
@@ -117,32 +143,49 @@ def initialize_qa_chain():
         Question: {question}
 
         Please provide your response in the following format:
-        1. Direct Answer: [Concise answer to the question]
-        2. Additional Details: [Relevant supporting information]
-        3. Related Topics: [Suggest 2-3 related topics]
-        4. Source Context: [Brief explanation of why these sources were chosen]
+
+        1. Direct Answer: 
+        [Provide a clear, concise answer directly addressing the question]
+
+        2. From the Documentation:
+        [Quote or summarize relevant information from the provided context]
+
+        3. Additional Details:
+        [Provide any important context, examples, code snippets, or clarifications]
+
+        4. Related Documentation:
+        [List 2-3 related topics from the Xanadu documentation that might be helpful]
+
+        Format your response using markdown for better readability.
+        Use bullet points and code blocks where appropriate.
+        If showing technical steps, number them clearly.
 
         Answer:"""
         
         PROMPT = PromptTemplate(
             template=prompt_template, 
-            input_variables=["context", "chat_history", "question", "sources"]
+            input_variables=["context", "chat_history", "question"]
         )
         
         task3 = progress.add_task("[yellow]Creating QA Chain...", total=100)
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=ChatOpenAI(temperature=0.7),
-            retriever=filtered_retriever,
+            retriever=SmartRetriever(vectorstore=vector_store),
             return_source_documents=True,
-            combine_docs_chain_kwargs={"prompt": PROMPT},
-            memory=ConversationBufferMemory(
+            combine_docs_chain_kwargs={
+                "prompt": PROMPT,
+                "document_variable_name": "context",
+                "document_separator": "\n\n"
+            },
+            memory=ConversationBufferWindowMemory(
                 memory_key="chat_history",
                 output_key="answer",
-                return_messages=True
+                return_messages=True,
+                k=3
             ),
             verbose=True
         )
-        progress.update(task3, advance=100)
+        progress.update(task3, completed=100)
         
     return qa_chain, vector_store
 
@@ -153,24 +196,24 @@ def display_welcome():
     Ask questions about the Xanadu release documentation.
     - Type 'exit' to end the conversation
     - Type 'clear' to clear chat history
-    - Type 'sources' to toggle source display
+    - Type 'sources' to toggle sources display
     """
     console.print(Panel(Markdown(welcome_text), border_style="cyan"))
 
-def display_sources(sources):
+def display_source(sources):
     table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Source", style="dim")
+    table.add_column("sources", style="dim")
     table.add_column("Page", justify="right")
     table.add_column("Preview", style="cyan")
     
     for doc in sources:
         table.add_row(
-            doc.metadata['source'],
+            doc.metadata['sources'],
             str(doc.metadata.get('page', 'N/A')),
             doc.page_content[:100] + "..."
         )
     
-    console.print(Panel(table, title="Sources", border_style="blue"))
+    console.print(Panel(table, title="sources", border_style="blue"))
 
 def load_cached_stats():
     cache_file = 'document_stats.json'
@@ -218,7 +261,7 @@ def get_document_stats(vector_store, force_refresh=False):
                     f"filename:{filename}",
                     k=1000
                 )
-                chunk_count = len([r for r in results if r.metadata['source'] == filename])
+                chunk_count = len([r for r in results if r.metadata['sources'] == filename])
                 
                 doc_stats = {
                     "filename": filename,
@@ -283,13 +326,7 @@ def display_document_stats(stats):
 def chat():
     display_welcome()
     
-    # Initialize QA chain with progress bar
     qa_chain, vector_store = initialize_qa_chain()
-    
-    # Load cached stats instead of checking files every time
-    stats = get_document_stats(vector_store)
-    display_document_stats(stats)
-    
     chat_history = []
     show_sources = True
     
@@ -308,18 +345,12 @@ def chat():
                 
             if question.lower() == 'sources':
                 show_sources = not show_sources
-                console.print(f"[yellow]Source display {'enabled' if show_sources else 'disabled'}[/]")
-                continue
-                
-            if question.lower() == 'refresh':
-                console.print("[yellow]Refreshing document statistics...[/]")
-                stats = get_document_stats(vector_store, force_refresh=True)
-                display_document_stats(stats)
+                console.print(f"[yellow]Sources display {'enabled' if show_sources else 'disabled'}[/]")
                 continue
             
             with console.status("[bold green]Thinking..."):
                 result = qa_chain.invoke({
-                    "question": question, 
+                    "question": question,
                     "chat_history": chat_history
                 })
             
@@ -331,8 +362,8 @@ def chat():
             ))
             
             # Display sources if enabled
-            if show_sources:
-                display_sources(result["source_documents"])
+            if show_sources and "source_documents" in result:
+                display_source(result["source_documents"])
             
             chat_history.append((question, result["answer"]))
             
