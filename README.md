@@ -1,10 +1,10 @@
-# ServiceNow Xanadu Documentation Chat Assistant
+# AI Documentation Chat Assistant
 
-An AI-powered chat interface for querying ServiceNow Xanadu documentation using RAG (Retrieval Augmented Generation) technology.
+An AI-powered chat interface for querying any documentation using RAG (Retrieval Augmented Generation) technology. This tool allows you to create an intelligent assistant that can answer questions about your documentation with source references and context.
 
 ## Features
 
-- Interactive chat interface with the Xanadu documentation
+- Interactive chat interface for your documentation
 - PDF processing and vectorization
 - Document statistics and management
 - Source reference tracking
@@ -16,14 +16,14 @@ An AI-powered chat interface for querying ServiceNow Xanadu documentation using 
 - Python 3.8+
 - OpenAI API key
 - Supabase account and project
-- ServiceNow Xanadu PDF documentation files
+- Your PDF documentation files
 
 ## Installation
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd xanadu-chat-assistant
+cd ai-doc-assistant
 ```
 
 2. Install required packages:
@@ -40,7 +40,7 @@ SUPABASE_SERVICE_KEY=your_supabase_service_key
 
 ## Setup
 
-1. Create the Supabase vector store table:
+1. Create a Supabase project and create the vector store table:
 ```sql
 create extension if not exists vector;
 
@@ -55,12 +55,12 @@ create index on documents using ivfflat (embedding vector_cosine_ops)
     with (lists = 100);
 ```
 
-2. Place your Xanadu PDF documentation files in the designated directory:
-```
-/Users/itscapitalx/Desktop/Xanadu PDFS/
+2. Update the PDF directory path in `pdf_processor.py`:
+```python
+pdf_directory = "/path/to/your/pdfs"  # Change to your PDF directory
 ```
 
-3. Process the PDFs (only needed once):
+3. Process your PDFs:
 ```bash
 python pdf_processor.py
 ```
@@ -79,187 +79,79 @@ python chat.py
 - `sources` - Toggle source display
 - `refresh` - Update document statistics
 
-## Features in Detail
+## Customization
 
-### Document Processing
-- Automatic PDF text extraction
-- Chunking for optimal retrieval
-- Vector embedding generation
-- Progress tracking for processed files
+### 1. Prompt Engineering
+Modify the assistant's personality and response format in `chat.py`:
+```python
+prompt_template = """You are an expert assistant for [YOUR DOMAIN].
+...
+Please provide your response in the following format:
+1. Direct Answer: [Concise answer to the question]
+2. Additional Details: [Relevant supporting information]
+3. Related Topics: [Suggest 2-3 related topics]
+"""
+```
 
-### Chat Interface
-- Rich text formatting
-- Loading indicators
-- Source document references
-- Conversation memory
-- Error handling
+### 2. Document Processing
+Adjust chunking parameters in `pdf_processor.py` for your documentation:
+```python
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,  # Adjust based on your content
+    chunk_overlap=200,  # Adjust for context preservation
+)
+```
 
-### Document Statistics
-- File sizes
-- Page counts
-- Chunk counts
-- Content previews
-- Cached statistics for quick startup
+### 3. Model Settings
+Fine-tune the AI response in `chat.py`:
+```python
+llm=ChatOpenAI(
+    temperature=0.7,  # Adjust for creativity (0.0) vs accuracy (1.0)
+)
+retriever=vector_store.as_retriever(
+    search_kwargs={"k": 4}  # Number of chunks to retrieve
+)
+```
 
-## Response Format
+## Performance Tips
 
-The AI assistant provides responses in a structured format:
-1. Direct Answer - Concise response to the question
-2. Additional Details - Supporting information
-3. Related Topics - Suggested related areas to explore
+1. **Large Documents**
+   - Increase batch size for faster processing
+   - Adjust chunk size for better context
+   - Monitor memory usage
 
-## Maintenance
+2. **Response Quality**
+   - Tune temperature for desired creativity
+   - Adjust chunk overlap for context
+   - Modify number of retrieved chunks
 
-- Use the `refresh` command to update document statistics
-- Monitor the `processed_files.json` for tracking processed documents
-- Check `document_stats.json` for cached statistics
+3. **Memory Usage**
+   - Use the refresh command sparingly
+   - Clear chat history for long sessions
+   - Monitor system resources
 
-## Files
+## Troubleshooting
 
-- `chat.py` - Main chat interface
-- `pdf_processor.py` - PDF processing utility
-- `processed_files.json` - Tracks processed documents
-- `document_stats.json` - Cached document statistics
+Common issues and solutions:
+1. **PDF Processing Errors**
+   - Check file permissions
+   - Verify PDF is not corrupted
+   - Ensure sufficient disk space
 
-## Error Handling
+2. **Vector Store Issues**
+   - Verify Supabase connection
+   - Check table creation
+   - Monitor API rate limits
 
-The tool includes robust error handling for:
-- PDF processing issues
-- Vector store operations
-- Chat interactions
-- File operations
-
-## Performance
-
-- Cached document statistics for fast startup
-- Batch processing for large PDFs
-- Optimized vector search
-- Memory management for long conversations
+3. **Memory Problems**
+   - Reduce batch size
+   - Clear chat history
+   - Process fewer documents at once
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests!
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT License
-
-Copyright (c) 2024 XTech Solutions
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-## Configuration and Customization
-
-### Essential Configuration
-
-1. **Environment Variables** (.env file):
-   ```env
-   OPENAI_API_KEY=your_openai_api_key
-   SUPABASE_URL=your_supabase_url
-   SUPABASE_SERVICE_KEY=your_supabase_service_key
-   ```
-
-2. **PDF Directory Path** (pdf_processor.py):
-   ```python
-   pdf_directory = "/Users/itscapitalx/Desktop/Xanadu PDFS"  # Change to your PDF directory
-   ```
-   Also update this path in chat.py's get_document_stats function.
-
-### AI Model Customization
-
-1. **Chunk Size** (pdf_processor.py):
-   ```python
-   text_splitter = RecursativeCharacterTextSplitter(
-       chunk_size=1000,  # Adjust for different document lengths
-       chunk_overlap=200,  # Adjust for context preservation
-   )
-   ```
-
-2. **LLM Parameters** (chat.py):
-   ```python
-   llm=ChatOpenAI(
-       temperature=0.7,  # Adjust for creativity vs accuracy (0.0-1.0)
-   )
-   ```
-
-3. **Context Window** (chat.py):
-   ```python
-   retriever=vector_store.as_retriever(
-       search_kwargs={"k": 4}  # Adjust number of chunks retrieved
-   )
-   ```
-
-### Prompt Engineering
-
-1. **Assistant Personality** (chat.py):
-   ```python
-   prompt_template = """You are a ServiceNow Xanadu expert assistant...
-   // Customize the prompt template for different use cases
-   """
-   ```
-
-2. **Response Format** (chat.py):
-   Modify the response structure in the prompt template:
-   ```python
-   Please provide your response in the following format:
-   1. Direct Answer: [Concise answer to the question]
-   2. Additional Details: [Relevant supporting information]
-   3. Related Topics: [Suggest 2-3 related topics]
-   ```
-
-### Performance Optimization
-
-1. **Batch Processing** (pdf_processor.py):
-   ```python
-   batch_size = 100  # Adjust based on available memory
-   ```
-
-2. **Vector Search** (supabase_setup.sql):
-   ```sql
-   create index on documents using ivfflat (embedding vector_cosine_ops)
-       with (lists = 100);  # Adjust for dataset size
-   ```
-
-### UI Customization
-
-1. **Console Styling** (chat.py):
-   ```python
-   # Modify Rich console styles
-   border_style="cyan"  # Change colors
-   style="dim"         # Adjust text styles
-   ```
-
-2. **Display Options** (chat.py):
-   - Modify table columns in display_document_stats
-   - Adjust preview lengths in display_sources
-   - Customize progress bar messages
-
-### Error Handling
-
-1. **Chunk Size Limits** (pdf_processor.py):
-   ```python
-   if file_size > 100:  # Adjust warning threshold for large files
-       print(f"Warning: {filename} is quite large...")
-   ```
-
-2. **Retry Logic** (chat.py):
-   - Add custom retry logic for API calls
-   - Modify error messages and recovery behavior
-
-Remember to test thoroughly after making any modifications, especially when adjusting chunk sizes or batch processing parameters, as these can impact both performance and memory usage.
+[MIT License](LICENSE)
